@@ -1,18 +1,14 @@
 import "server-only";
 import { canWait, NO_DEADLINE } from "@/lib/ai/budget";
-import { embedImage, lookAt, rateLimitDelayMs } from "@/lib/ai/gemini";
+import { embedImage, isTransient, lookAt, rateLimitDelayMs } from "@/lib/ai/gemini";
 import { placeItem } from "@/lib/boards/place";
 import { MAX_BOARDS_PER_ITEM } from "@/lib/config";
 import { boardsForPlacement, recomputeBoards, replaceAutoMemberships } from "@/lib/db/boards";
 import { claimItem, markFailed, markReady, releaseClaim, saveProcessed, type ItemRow } from "@/lib/db/items";
-import { BudgetExceeded } from "@/lib/db/usage";
 import { cropRect, normalizeImage, renderVariants } from "@/lib/images/crop";
 import { deleteFiles, download, putImage } from "@/lib/storage";
 
 export type ProcessOutcome = "ready" | "failed" | "deferred" | "skipped";
-
-/** Errors that mean "try again later" rather than "this item is broken". */
-export const isTransient = (error: unknown) => error instanceof BudgetExceeded || rateLimitDelayMs(error) !== null;
 
 export type ProcessOptions = {
   /** Epoch ms after which no rate-limit wait may end (the sweep's budget). */

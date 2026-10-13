@@ -1,7 +1,8 @@
 import type { GoogleGenAI } from "@google/genai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTestDb } from "@/lib/db/testing";
-import { embedImage, embedQuery, lookAt, nameBoard, setAiForTests } from "./gemini";
+import { BudgetExceeded } from "@/lib/db/usage";
+import { embedImage, embedQuery, isTransient, lookAt, nameBoard, setAiForTests } from "./gemini";
 
 useTestDb();
 
@@ -55,5 +56,12 @@ describe("gemini wrapper", () => {
   it("nameBoard cuts over-long replies instead of rejecting them", async () => {
     generateContent.mockResolvedValue({ text: JSON.stringify({ name: "n".repeat(60), description: "d".repeat(300) }) });
     expect(await nameBoard(["x"])).toEqual({ name: "n".repeat(40), description: "d".repeat(200) });
+  });
+
+  it("isTransient: the daily budget and rate limits, not other errors", () => {
+    expect(isTransient(new BudgetExceeded("search"))).toBe(true);
+    expect(isTransient(Object.assign(new Error("{}"), { status: 429 }))).toBe(true);
+    expect(isTransient(Object.assign(new Error("bad request"), { status: 400 }))).toBe(false);
+    expect(isTransient(new SyntaxError("bad json"))).toBe(false);
   });
 });

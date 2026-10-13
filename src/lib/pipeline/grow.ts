@@ -1,10 +1,9 @@
 import "server-only";
-import { nameBoard } from "@/lib/ai/gemini";
+import { isTransient, nameBoard } from "@/lib/ai/gemini";
 import { findNewBoards } from "@/lib/boards/grow";
 import { createBoard } from "@/lib/db/boards";
 import { looseItems } from "@/lib/db/items";
 import { acquireLease, releaseLease } from "@/lib/db/settings";
-import { isTransient } from "./process";
 
 const LEASE = "grow_lock";
 

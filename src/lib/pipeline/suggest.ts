@@ -1,12 +1,11 @@
 import "server-only";
-import { nameBoard } from "@/lib/ai/gemini";
+import { isTransient, nameBoard } from "@/lib/ai/gemini";
 import { findMerges, findSplit, fingerprint } from "@/lib/boards/suggest";
 import { MIN_SPLIT_BOARD } from "@/lib/config";
 import { boardMembers, boardSummaries, createBoard, findBoard, mergeBoards, moveMembers, renameBoard, setBoardDescription } from "@/lib/db/boards";
 import { acquireLease, releaseLease } from "@/lib/db/settings";
 import { boardsWithOpenSuggestions, getSuggestion, openSuggestion, setSuggestionStatus, suggestionExists } from "@/lib/db/suggestions";
 import { centroidOf } from "@/lib/vectors/centroid";
-import { isTransient } from "./process";
 
 const LEASE = "suggest_lock";
 

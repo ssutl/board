@@ -1,23 +1,24 @@
 import Link from "next/link";
 import { Masonry } from "@/components/Masonry";
 import { SearchBox } from "@/components/SearchBox";
-import { embedQuery } from "@/lib/ai/gemini";
-import { searchPublic } from "@/lib/db/public";
+import { embedQuery, isTransient } from "@/lib/ai/gemini";
 import { BudgetExceeded } from "@/lib/db/usage";
+import { searchPublic } from "@/lib/db/public";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Search" };
 
-export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const q = ((await searchParams).q ?? "").trim().slice(0, 200);
+export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string | string[] }> }) {
+  const raw = (await searchParams).q; // ?q=a&q=b arrives as an array: take the first
+  const q = ((Array.isArray(raw) ? raw[0] : raw) ?? "").trim().slice(0, 200);
   let result: Awaited<ReturnType<typeof searchPublic>> | null = null;
-  let resting = false;
+  let resting: string | null = null;
   if (q) {
     try {
       result = await searchPublic(await embedQuery(q));
     } catch (error) {
-      if (!(error instanceof BudgetExceeded)) throw error;
-      resting = true;
+      if (!isTransient(error)) throw error; // out of today's searches, or rate-limited
+      resting = error instanceof BudgetExceeded ? "Search is resting for today. Try again tomorrow." : "Search is busy. Try again in a minute.";
     }
   }
   return (
@@ -28,7 +29,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         </Link>
         <SearchBox defaultValue={q} />
       </header>
-      {resting && <p className="py-16 text-center text-sm text-muted">Search is resting for today. Try again tomorrow.</p>}
+      {resting && <p className="py-16 text-center text-sm text-muted">{resting}</p>}
       {result && result.boards.length > 0 && (
         <p className="mb-4 text-sm">
           Boards:{" "}

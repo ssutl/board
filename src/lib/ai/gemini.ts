@@ -2,7 +2,7 @@ import "server-only";
 import { ApiError, GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import { DIMENSIONS } from "@/lib/config";
-import { spendCalls } from "@/lib/db/usage";
+import { BudgetExceeded, spendCalls } from "@/lib/db/usage";
 import { normalize } from "@/lib/vectors/math";
 import { LOOK_PROMPT, parseLook, type Look } from "./look";
 
@@ -109,6 +109,9 @@ export function rateLimitDelayMs(error: unknown): number | null {
   if (retryDelay === undefined) return DEFAULT_RATE_LIMIT_DELAY_MS;
   return Math.min(Number(retryDelay) * 1000 + 1000, MAX_RATE_LIMIT_DELAY_MS);
 }
+
+/** Errors that mean "try again later" (daily budget spent, or rate-limited) rather than "this is broken". */
+export const isTransient = (error: unknown) => error instanceof BudgetExceeded || rateLimitDelayMs(error) !== null;
 
 const cut = (max: number) => z.string().transform((v) => v.trim().slice(0, max).trim()).pipe(z.string().min(1));
 const BoardName = z.object({ name: cut(40), description: cut(200) });
