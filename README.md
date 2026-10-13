@@ -102,7 +102,8 @@ Crons (`vercel.json`; both need `CRON_SECRET`, which Vercel sends as a Bearer to
 3. Vercel Blob store `board-images`.
 4. Set every variable in `.env.example` as a **Production** secret. Secrets can't be pulled
    locally, so there is no local database; migrations (`scripts/migrate.mts`, files in
-   `db/migrations/`) run in the `vercel-build` script on every deploy.
+   `db/migrations/`) run in the `vercel-build` script on production deploys
+   (preview builds skip them).
 5. DNS: `board.ssutl.com` → Vercel.
 6. Open `/edit`, generate a drop key, build the Shortcut.
 

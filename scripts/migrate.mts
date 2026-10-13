@@ -3,6 +3,17 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 
+// vercel-build runs this on every deploy. Only production deploys migrate: previews have no
+// DATABASE_URL, and if one were added a branch's migrations would hit the production database.
+if (process.env.VERCEL && process.env.VERCEL_ENV !== "production") {
+  console.log("skipping migrations outside production");
+  process.exit(0);
+}
+if (!process.env.DATABASE_URL) {
+  console.error("DATABASE_URL is not set; cannot run migrations.");
+  process.exit(1);
+}
+
 const dir = path.join(process.cwd(), "db", "migrations");
 const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
