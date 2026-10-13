@@ -18,6 +18,10 @@ export function isBlockedSource(url: string): boolean {
   return BLOCKED.some((d) => host === d || host.endsWith(`.${d}`));
 }
 
+function isPrivateV4([a, b]: number[]): boolean {
+  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+}
+
 /** http(s) to a public host only: no localhost, private, link-local or credentialed URLs. */
 export function isSafeFetchUrl(raw: string): boolean {
   let u: URL;
@@ -28,21 +32,27 @@ export function isSafeFetchUrl(raw: string): boolean {
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
   if (u.username || u.password) return false;
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) return false;
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) {
-    const [a, b] = host.split(".").map(Number);
-    if (a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127))
-      return false;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(host)) return !isPrivateV4(host.split(".").map(Number));
+  if (host.includes(":")) {
+    if (host === "::1" || host === "::" || /^f[cd]/.test(host) || /^fe[89a-f]/.test(host)) return false;
+    // IPv4 embedded in the last 32 bits: ::a:b, ::ffff:a:b, 64:ff9b::a:b
+    const m = host.match(/^(?:::(?:ffff:)?|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (m) {
+      const hi = parseInt(m[1], 16);
+      const lo = parseInt(m[2], 16);
+      if (isPrivateV4([hi >> 8, hi & 255, lo >> 8, lo & 255])) return false;
+    }
+    if (host.startsWith("::ffff:")) return false;
   }
-  if (host.includes(":") && (host === "::1" || host === "::" || /^f[cd]/.test(host) || host.startsWith("fe80") || host.startsWith("::ffff:"))) return false;
   return true;
 }
 
 const ATTR = /([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/g;
 const ENTITIES: Record<string, string> = { amp: "&", quot: '"', "#39": "'", apos: "'", lt: "<", gt: ">" };
 const decode = (s: string) =>
-  s.replace(/&(amp|quot|#39|apos|lt|gt);/g, (_, e: string) => ENTITIES[e]).replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)));
+  s.replace(/&(amp|quot|#39|apos|lt|gt);/g, (_, e: string) => ENTITIES[e]).replace(/&#(\d+);/g, (whole, n: string) => (Number(n) > 0 && Number(n) <= 0x10ffff ? String.fromCodePoint(Number(n)) : whole));
 
 /** The page's share image (og/twitter) and title, with the image resolved against the page URL. */
 export function parseMeta(html: string, baseUrl: string): { image: string | null; title: string | null } {

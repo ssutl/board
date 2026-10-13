@@ -23,9 +23,10 @@ describe("isSafeFetchUrl", () => {
   it("allows public http(s)", () => {
     expect(isSafeFetchUrl("https://example.com/a")).toBe(true);
     expect(isSafeFetchUrl("http://8.8.8.8/")).toBe(true);
+    expect(isSafeFetchUrl("http://[2606:4700::1111]/")).toBe(true);
   });
   it("refuses other schemes, localhost, private and link-local addresses, credentials", () => {
-    for (const u of ["file:///etc/passwd", "javascript:alert(1)", "http://localhost:3000", "http://app.localhost", "http://127.0.0.1", "http://2130706433/", "http://10.0.0.1", "http://172.16.5.4", "http://192.168.1.1", "http://169.254.169.254/latest", "http://[::1]/", "http://[fd00::1]/", "http://user:pw@example.com", "not a url"])
+    for (const u of ["file:///etc/passwd", "javascript:alert(1)", "http://localhost:3000", "http://app.localhost", "http://127.0.0.1", "http://2130706433/", "http://10.0.0.1", "http://172.16.5.4", "http://192.168.1.1", "http://169.254.169.254/latest", "http://[::1]/", "http://[fd00::1]/", "http://user:pw@example.com", "not a url", "http://localhost./", "http://x.localhost./", "http://metadata.google.internal./", "http://[::127.0.0.1]/", "http://[64:ff9b::7f00:1]/", "http://[fec0::1]/", "http://[::ffff:7f00:1]/"])
       expect(isSafeFetchUrl(u), u).toBe(false);
   });
 });
@@ -40,6 +41,10 @@ describe("parseMeta", () => {
   it("falls back to twitter:image and <title>", () => {
     const html = `<title>  A   Jacket </title><meta name="twitter:image" content="https://cdn.example.com/j.png">`;
     expect(parseMeta(html, "https://example.com")).toEqual({ image: "https://cdn.example.com/j.png", title: "A Jacket" });
+  });
+  it("does not throw on out-of-range numeric entities", () => {
+    const r = parseMeta("<title>a &#99999999999; b</title>", "https://example.com");
+    expect(r.title).toContain("a");
   });
   it("returns nulls when there is nothing", () => {
     expect(parseMeta("<p>hi</p>", "https://example.com")).toEqual({ image: null, title: null });
