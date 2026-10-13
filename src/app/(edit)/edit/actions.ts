@@ -6,7 +6,7 @@ import { after } from "next/server";
 import { rotateDropKey } from "@/lib/auth/dropKey";
 import { requireSession } from "@/lib/auth/requireSession";
 import {
-  addToBoard, recomputeBoards, removeFromBoard, renameBoard, setBoardCover, setBoardDescription, setBoardHidden,
+  addToBoard, findBoard, recomputeBoards, removeFromBoard, renameBoard, setBoardCover, setBoardDescription, setBoardHidden,
 } from "@/lib/db/boards";
 import { deleteItem, resetForReprocess, setItemHidden } from "@/lib/db/items";
 import { growBoards } from "@/lib/pipeline/grow";
@@ -63,6 +63,12 @@ export async function addItemToBoard(itemId: string, form: FormData): Promise<vo
 
 export async function removeItemFromBoard(itemId: string, boardId: string): Promise<void> {
   await guarded(() => removeFromBoard(itemId, boardId));
+}
+
+/** From the board's own page: removing its last member deletes the board, so go back to the list. */
+export async function removeItemFromBoardPage(boardId: string, itemId: string): Promise<void> {
+  await guarded(() => removeFromBoard(itemId, boardId));
+  if (!(await findBoard(boardId))) redirect("/edit/boards");
 }
 
 export async function renameBoardAction(boardId: string, form: FormData): Promise<void> {

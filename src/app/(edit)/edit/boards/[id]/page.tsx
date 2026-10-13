@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { hasSession } from "@/lib/auth/requireSession";
 import { boardForEdit } from "@/lib/db/edit";
-import { describeBoardAction, removeItemFromBoard, renameBoardAction, setBoardHiddenAction, setCoverAction } from "../../actions";
+import { describeBoardAction, removeItemFromBoardPage, renameBoardAction, setBoardHiddenAction, setCoverAction } from "../../actions";
 import { SignInPrompt } from "../../SignInPrompt";
 import { ThumbGrid } from "../../ThumbGrid";
 
@@ -49,7 +49,7 @@ export default async function EditBoardPage({ params }: { params: Promise<{ id: 
                 <button className="underline">Cover</button>
               </form>
             )}
-            <form action={removeItemFromBoard.bind(null, item.id, board.id)}>
+            <form action={removeItemFromBoardPage.bind(null, board.id, item.id)}>
               <button className="text-muted underline hover:text-ink">Remove</button>
             </form>
           </>

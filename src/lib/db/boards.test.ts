@@ -4,7 +4,7 @@ import { db } from "./client";
 import { axis, insertTestItem, useTestDb } from "./testing";
 import { fromVector } from "./vector";
 import {
-  addToBoard, boardMembers, boardsForPlacement, boardSummaries, createBoard, mergeBoards, moveMembers,
+  addToBoard, boardMembers, boardsForPlacement, boardSummaries, createBoard, findBoard, mergeBoards, moveMembers,
   recomputeBoards, removeFromBoard, replaceAutoMemberships, setBoardHidden,
 } from "./boards";
 import { openSuggestion, listOpenSuggestions } from "./suggestions";
@@ -57,8 +57,10 @@ describe("boards", () => {
   it("deletes a board left empty and rejects its open suggestions", async () => {
     const board = await boardWith(1);
     await openSuggestion({ type: "merge", payload: { keepId: board.id, dropId: "x", similarity: 0.95 } }, "fp1");
+    expect(await findBoard(board.id)).toEqual({ id: board.id, hidden: false });
     await removeFromBoard(board.ids[0], board.id);
     expect(await boardRow(board.id)).toBeUndefined();
+    expect(await findBoard(board.id)).toBeNull();
     expect(await listOpenSuggestions()).toEqual([]);
   });
 
