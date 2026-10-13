@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { verifyDropKey } from "./dropKey";
 import { SESSION_COOKIE, sessionSecret, verifySession } from "./session";
 
@@ -19,11 +20,18 @@ function cookie(req: Request, name: string): string | undefined {
 export async function dropAuthorized(req: Request): Promise<boolean> {
   const token = bearer(req);
   if (token) return verifyDropKey(token);
-  return verifySession(cookie(req, SESSION_COOKIE), sessionSecret());
+  try {
+    return await verifySession(cookie(req, SESSION_COOKIE), sessionSecret());
+  } catch {
+    return false; // malformed cookie, or BOARD_SECRET missing/short
+  }
 }
 
 /** Vercel cron sends `Authorization: Bearer $CRON_SECRET`. */
 export function cronAuthorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
-  return !!secret && bearer(req) === secret;
+  const token = bearer(req);
+  if (!secret || !token) return false;
+  const digest = (v: string) => createHash("sha256").update(v).digest();
+  return timingSafeEqual(digest(token), digest(secret));
 }
