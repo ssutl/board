@@ -4,7 +4,7 @@ import { Sheet } from "@/components/Sheet";
 export default async function ItemSheet({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   return (
-    <Sheet>
+    <Sheet key={id}>
       <ItemDetail id={id} />
     </Sheet>
   );
