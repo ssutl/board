@@ -5,8 +5,8 @@ import "./globals.css";
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
 
 export const metadata: Metadata = {
-  title: { default: "Board", template: "%s · Board" },
-  description: "Things I like: product design, cars, clothes, spaces.",
+  title: { default: "Board · Domain for all my visions and screenshots", template: "%s · Board" },
+  description: "Domain for all my visions and screenshots.",
   metadataBase: new URL("https://board.ssutl.com"),
 };
 

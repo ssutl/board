@@ -10,7 +10,10 @@ export default async function Home() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
       <header className="mb-8 flex items-center justify-between gap-4">
-        <h1 className="text-sm font-semibold tracking-wide">board.ssutl.com</h1>
+        <div>
+          <h1 className="text-sm font-semibold tracking-wide">board.ssutl.com</h1>
+          <p className="text-sm text-muted">Domain for all my visions and screenshots</p>
+        </div>
         <SearchBox />
       </header>
       {boards.length > 0 && (
