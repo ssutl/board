@@ -1,0 +1,90 @@
+import { describe, expect, it } from "vitest";
+import { dot } from "@/lib/vectors/math";
+import { db } from "./client";
+import { axis, insertTestItem, useTestDb } from "./testing";
+import { fromVector } from "./vector";
+import {
+  addToBoard, boardMembers, boardsForPlacement, boardSummaries, createBoard, mergeBoards, moveMembers,
+  recomputeBoards, removeFromBoard, replaceAutoMemberships,
+} from "./boards";
+import { openSuggestion, listOpenSuggestions } from "./suggestions";
+
+useTestDb();
+
+async function boardWith(n: number, at = 0, name = "Analog 80s") {
+  const ids: string[] = [];
+  for (let i = 0; i < n; i++) ids.push(await insertTestItem({ embedding: axis(at, { [at + 1]: i * 0.01 }) }));
+  const board = await createBoard({ name, description: "d", centroid: axis(at), coverItemId: ids[0], members: ids.map((itemId) => ({ itemId, similarity: 0.9 })) });
+  return { ...board, ids };
+}
+
+const boardRow = async (id: string) =>
+  (await db().query<{ cover_item_id: string | null; centroid: string }>("select cover_item_id, centroid::text as centroid from boards where id = $1", [id]))[0];
+
+describe("boards", () => {
+  it("createBoard gives unique slugs", async () => {
+    const a = await boardWith(2);
+    const b = await boardWith(2, 4);
+    expect([a.slug, b.slug]).toEqual(["analog-80s", "analog-80s-2"]);
+  });
+
+  it("replaceAutoMemberships keeps pinned and excluded rows", async () => {
+    const a = await boardWith(1, 0, "A");
+    const b = await boardWith(1, 4, "B");
+    const c = await boardWith(1, 8, "C");
+    const item = await insertTestItem({ embedding: axis(0) });
+    await addToBoard(item, a.id); // pinned
+    await removeFromBoard(item, b.id); // excluded
+    await replaceAutoMemberships(item, [{ boardId: c.id, similarity: 0.8 }]);
+    const flags = await boardsForPlacement(item);
+    const byId = Object.fromEntries(flags.map((f) => [f.id, f]));
+    expect(byId[a.id]).toMatchObject({ pinned: true, member: true });
+    expect(byId[b.id]).toMatchObject({ excluded: true, member: false });
+    expect(byId[c.id]).toMatchObject({ member: true, pinned: false });
+    await replaceAutoMemberships(item, []);
+    expect((await boardsForPlacement(item)).find((f) => f.id === c.id)?.member).toBe(false);
+  });
+
+  it("recomputes the centroid and reassigns a deleted cover", async () => {
+    const board = await boardWith(3);
+    await db().query("delete from items where id = $1", [board.ids[0]]);
+    await recomputeBoards([board.id]);
+    const row = await boardRow(board.id);
+    expect(board.ids.slice(1)).toContain(row.cover_item_id);
+    expect(dot(fromVector(row.centroid), axis(0))).toBeGreaterThan(0.99);
+  });
+
+  it("deletes a board left empty and rejects its open suggestions", async () => {
+    const board = await boardWith(1);
+    await openSuggestion({ type: "merge", payload: { keepId: board.id, dropId: "x", similarity: 0.95 } }, "fp1");
+    await removeFromBoard(board.ids[0], board.id);
+    expect(await boardRow(board.id)).toBeUndefined();
+    expect(await listOpenSuggestions()).toEqual([]);
+  });
+
+  it("mergeBoards moves members, keeps pinned, respects exclusions, deletes the dropped board", async () => {
+    const keep = await boardWith(2, 0, "Keep");
+    const drop = await boardWith(2, 0, "Drop");
+    await addToBoard(drop.ids[0], drop.id); // pinned on drop
+    await removeFromBoard(drop.ids[1], keep.id); // excluded from keep
+    await mergeBoards(keep.id, drop.id);
+    const members = await boardMembers(keep.id);
+    expect(members.map((m) => m.itemId).sort()).toEqual([...keep.ids, drop.ids[0]].sort());
+    expect(members.find((m) => m.itemId === drop.ids[0])?.pinned).toBe(true);
+    expect(await boardRow(drop.id)).toBeUndefined();
+  });
+
+  it("moveMembers moves only the given items", async () => {
+    const from = await boardWith(3, 0, "From");
+    const to = await boardWith(1, 4, "To");
+    await moveMembers(from.id, to.id, [from.ids[2]]);
+    expect((await boardMembers(to.id)).map((m) => m.itemId).sort()).toEqual([to.ids[0], from.ids[2]].sort());
+    expect((await boardMembers(from.id)).map((m) => m.itemId)).not.toContain(from.ids[2]);
+  });
+
+  it("boardSummaries counts non-excluded members", async () => {
+    const board = await boardWith(3);
+    await removeFromBoard(board.ids[0], board.id);
+    expect((await boardSummaries()).find((s) => s.id === board.id)?.size).toBe(2);
+  });
+});
