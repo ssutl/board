@@ -82,6 +82,17 @@ describe("items", () => {
     expect(await deleteItem(id)).toBeNull();
   });
 
+  it("resetForReprocess leaves a live processing claim alone, but resets a stale one", async () => {
+    const { id } = await insertImageItem({ contentHash: "h-live", originalUrl: "https://blob/live" });
+    await claimItem(id);
+    expect(await resetForReprocess(id)).toBe(false);
+    const status = async () => (await db().query<{ status: string }>("select status from items where id = $1", [id]))[0].status;
+    expect(await status()).toBe("processing");
+    await setRow(id, "claimed_at = now() - interval '11 minutes'");
+    expect(await resetForReprocess(id)).toBe(true);
+    expect(await status()).toBe("pending");
+  });
+
   it("counts attempts at claim time, and markFailed does not add one", async () => {
     const { id } = await insertImageItem({ contentHash: "h9", originalUrl: "https://blob/9" });
     await claimItem(id);

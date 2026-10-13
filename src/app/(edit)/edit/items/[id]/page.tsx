@@ -29,7 +29,7 @@ export default async function EditItemPage({ params }: { params: Promise<{ id: s
       </div>
       <div className="space-y-5 text-sm">
         <p className="text-muted">
-          {item.status}
+          {item.stale ? "stuck in processing" : item.status}
           {item.error && `: ${item.error}`}
         </p>
         {item.caption && <p className="text-base">{item.caption}</p>}
@@ -47,7 +47,7 @@ export default async function EditItemPage({ params }: { params: Promise<{ id: s
               <button className={button}>Use original instead of crop</button>
             </form>
           )}
-          {item.kind === "image" && item.status !== "processing" && (
+          {item.kind === "image" && (item.status !== "processing" || item.stale) && (
             <form action={retryItem.bind(null, item.id)}>
               <button className={button}>Reprocess</button>
             </form>

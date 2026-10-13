@@ -30,15 +30,13 @@ const reprocess = (id: string) =>
 
 export async function retryItem(id: string): Promise<void> {
   await guarded(async () => {
-    await resetForReprocess(id);
-    reprocess(id);
+    if (await resetForReprocess(id)) reprocess(id);
   });
 }
 
 export async function useOriginalImage(id: string): Promise<void> {
   await guarded(async () => {
-    await resetForReprocess(id, { useCrop: false });
-    reprocess(id);
+    if (await resetForReprocess(id, { useCrop: false })) reprocess(id);
   });
 }
 

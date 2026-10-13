@@ -142,9 +142,12 @@ export async function deleteItem(id: string): Promise<{ files: string[]; boardId
   return { files, boardIds };
 }
 
-export async function resetForReprocess(id: string, { useCrop }: { useCrop?: boolean } = {}): Promise<void> {
-  await db().query(
-    "update items set status = 'pending', attempts = 0, error = null, claimed_at = null, use_crop = coalesce($2, use_crop) where id = $1 and kind = 'image'",
+/** Re-queues an image, unless a live run is processing it (that would make two runs). Returns whether it did. */
+export async function resetForReprocess(id: string, { useCrop }: { useCrop?: boolean } = {}): Promise<boolean> {
+  const rows = await db().query(
+    `update items set status = 'pending', attempts = 0, error = null, claimed_at = null, use_crop = coalesce($2, use_crop)
+     where id = $1 and kind = 'image' and (status <> 'processing' or ${STALE_CLAIM}) returning id`,
     [id, useCrop ?? null],
   );
+  return rows.length > 0;
 }
