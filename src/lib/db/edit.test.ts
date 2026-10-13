@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createBoard } from "./boards";
+import { db } from "./client";
 import { insertLinkItem } from "./items";
 import { openSuggestion } from "./suggestions";
 import { axis, insertTestItem, useTestDb } from "./testing";
@@ -20,6 +21,17 @@ describe("edit queries", () => {
     expect((await listInbox()).map((r) => r.status).sort()).toEqual(["failed", "pending"]);
     const loose = await listLooseForEdit();
     expect([loose.images.length, loose.links.length]).toEqual([1, 1]);
+  });
+
+  it("flags processing items whose claim has gone stale", async () => {
+    const fresh = await insertTestItem({ status: "pending" });
+    const stuck = await insertTestItem({ status: "pending" });
+    await db().query("update items set status = 'processing', claimed_at = now() where id = $1", [fresh]);
+    await db().query("update items set status = 'processing', claimed_at = now() - interval '11 minutes' where id = $1", [stuck]);
+    const flags = Object.fromEntries((await listInbox()).map((r) => [r.id, r.stale]));
+    expect(flags).toEqual({ [fresh]: false, [stuck]: true });
+    expect((await itemForEdit(fresh))?.item.stale).toBe(false);
+    expect((await itemForEdit(stuck))?.item.stale).toBe(true);
   });
 
   it("reads a board and an item with their relationships", async () => {

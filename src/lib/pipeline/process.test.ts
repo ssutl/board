@@ -33,7 +33,7 @@ const look = (box: [number, number, number, number] | null = null) => ({
 beforeEach(async () => {
   vi.mocked(storage.download).mockResolvedValue(await sharp({ create: { width: 1000, height: 800, channels: 3, background: "#c33" } }).jpeg().toBuffer());
   vi.mocked(gemini.lookAt).mockResolvedValue(look());
-  vi.mocked(gemini.embedImage).mockResolvedValue(axis(0));
+  vi.mocked(gemini.embedImage).mockReset().mockResolvedValue(axis(0));
   vi.mocked(storage.deleteFiles).mockClear();
 });
 
@@ -67,15 +67,39 @@ describe("processItem", () => {
     expect(await getItem(id)).toMatchObject({ status: "failed", attempts: 1, error: "Unexpected token" });
   });
 
+  const rateLimited = () => Object.assign(new Error('{"error":{"code":429},"retryDelay":"20s"}'), { status: 429 });
+
   it("defers without using an attempt when the budget is spent or rate-limited", async () => {
+    const sleep = vi.fn(async () => {});
     vi.mocked(gemini.embedImage).mockRejectedValue(new BudgetExceeded("pipeline"));
     const a = await newItem();
-    expect(await processItem(a)).toBe("deferred");
+    expect(await processItem(a, { sleep })).toBe("deferred");
     expect(await getItem(a)).toMatchObject({ status: "pending", attempts: 0 });
+    expect(sleep).not.toHaveBeenCalled();
 
-    vi.mocked(gemini.embedImage).mockRejectedValue(Object.assign(new Error('{"error":{"code":429}}'), { status: 429 }));
+    vi.mocked(gemini.embedImage).mockClear().mockRejectedValue(rateLimited());
     const b = await newItem();
-    expect(await processItem(b)).toBe("deferred");
+    expect(await processItem(b, { sleep })).toBe("deferred");
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(gemini.embedImage).toHaveBeenCalledTimes(2);
+    expect(await getItem(b)).toMatchObject({ status: "pending", attempts: 0 });
+  });
+
+  it("waits out a rate limit once and retries the item", async () => {
+    const sleep = vi.fn(async () => {});
+    vi.mocked(gemini.embedImage).mockRejectedValueOnce(rateLimited()).mockResolvedValueOnce(axis(0));
+    const id = await newItem();
+    expect(await processItem(id, { sleep })).toBe("ready");
+    expect(sleep).toHaveBeenCalledWith(21_000);
+    expect(await getItem(id)).toMatchObject({ status: "ready", attempts: 1 });
+  });
+
+  it("defers instead of waiting when the wait would run past the deadline", async () => {
+    const sleep = vi.fn(async () => {});
+    vi.mocked(gemini.embedImage).mockRejectedValueOnce(rateLimited());
+    const id = await newItem();
+    expect(await processItem(id, { sleep, until: Date.now() + 10_000 })).toBe("deferred");
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it("skips an item someone else is processing", async () => {

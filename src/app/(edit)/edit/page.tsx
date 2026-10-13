@@ -21,10 +21,10 @@ export default async function EditHome() {
                 {row.source_url ?? row.id.slice(0, 8)}
               </a>
               <span className="shrink-0 text-muted">
-                {row.status}
+                {row.stale ? "stuck" : row.status}
                 {row.status === "failed" && ` (${row.attempts}×): ${row.error ?? ""}`}
               </span>
-              {row.status === "failed" && (
+              {(row.status !== "processing" || row.stale) && (
                 <form action={retryItem.bind(null, row.id)}>
                   <button className="underline">Retry</button>
                 </form>

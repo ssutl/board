@@ -1,10 +1,12 @@
 import "server-only";
 import { db } from "./client";
-import type { ItemRow } from "./items";
+import { STALE_CLAIM, type ItemRow } from "./items";
 
 export type EditThumb = { id: string; image_url: string | null; width: number | null; height: number | null; caption: string | null; hidden: boolean; status: string };
 const THUMB = "i.id, coalesce(i.image_url, i.original_url) as image_url, i.width, i.height, i.caption, i.hidden, i.status";
 const LOOSE = "not exists (select 1 from board_items bi where bi.item_id = i.id and not bi.excluded)";
+/** Processing, but the run that claimed it has died: safe to retry. */
+const STALE = `(status = 'processing' and coalesce(${STALE_CLAIM}, false))`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function editBadges(): Promise<{ inbox: number; loose: number; suggestions: number }> {
@@ -17,8 +19,9 @@ export async function editBadges(): Promise<{ inbox: number; loose: number; sugg
 }
 
 export async function listInbox() {
-  return db().query<{ id: string; status: string; attempts: number; error: string | null; original_url: string | null; source_url: string | null }>(
-    "select id, status, attempts, error, original_url, source_url from items where status in ('pending', 'processing', 'failed') order by created_at desc",
+  return db().query<{ id: string; status: string; attempts: number; error: string | null; original_url: string | null; source_url: string | null; stale: boolean }>(
+    `select id, status, attempts, error, original_url, source_url, ${STALE} as stale
+     from items where status in ('pending', 'processing', 'failed') order by created_at desc`,
   );
 }
 
@@ -58,8 +61,10 @@ export async function boardForEdit(id: string) {
 
 export async function itemForEdit(id: string) {
   if (!UUID.test(id)) return null;
-  const [item] = await db().query<ItemRow>(
-    "select id, kind, status, attempts, error, original_url, image_url, uncropped_url, width, height, use_crop, source_url, title, caption, tags, hidden, blocked_source from items where id = $1",
+  const [item] = await db().query<ItemRow & { stale: boolean }>(
+    `select id, kind, status, attempts, error, original_url, image_url, uncropped_url, width, height, use_crop, source_url, title, caption, tags, hidden, blocked_source,
+            ${STALE} as stale
+     from items where id = $1`,
     [id],
   );
   if (!item) return null;

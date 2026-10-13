@@ -213,7 +213,7 @@ Routes: `/edit` (drop + inbox), `/edit/loose`, `/edit/items/[id]`, `/edit/boards
 `/edit/boards/[id]`, `/edit/suggestions`, `/edit/shortcut`.
 
 - **Drop** (`/edit`) — ⌘V paste, drag files, paste URL; posts to `/api/drop`.
-- **Inbox** (`/edit`) — pending and failed items; retry button on failed.
+- **Inbox** (`/edit`) — pending and failed items; retry button on failed, pending and stuck (stale processing) items.
 - **Loose** (`/edit/loose`) — grid of unplaced items, plus link cards (incl. "screenshot this
   instead" for blocked sources).
 - **Suggestions** — split/merge with item previews; accept/reject.

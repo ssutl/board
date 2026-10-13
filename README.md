@@ -82,8 +82,9 @@ Per item, in `src/lib/pipeline/process.ts`:
    the point with the most close neighbours, gather points near its centroid, keep the group if it
    is big and tight enough, repeat. Gemini names each board. Existing boards are untouched.
 
-When the daily Gemini call cap is spent or Gemini rate-limits, the item goes back to `pending`
-without using an attempt.
+When Gemini rate-limits, the item waits out the delay once (up to 65 s) and retries. If it is
+still rate-limited, or the daily Gemini call cap is spent, it goes back to `pending` without
+using an attempt; the inbox offers Retry for pending, failed and stuck items.
 
 Crons (`vercel.json`; both need `CRON_SECRET`, which Vercel sends as a Bearer token):
 

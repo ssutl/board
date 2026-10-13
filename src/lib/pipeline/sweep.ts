@@ -11,7 +11,7 @@ export async function sweep(until: number, now: () => number = Date.now): Promis
   const counts: SweepResult = { ready: 0, failed: 0, deferred: 0, skipped: 0, boards: 0, timedOut: await failExhaustedClaims() };
   for (const id of await claimableIds(100)) {
     if (!hasTime(now(), until)) break;
-    const outcome = await processItem(id);
+    const outcome = await processItem(id, { until });
     counts[outcome]++;
     if (outcome === "deferred") break; // budget spent or rate-limited: the rest would defer too
   }

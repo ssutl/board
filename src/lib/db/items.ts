@@ -27,8 +27,11 @@ export type ItemRow = {
 const COLUMNS =
   "id, kind, status, attempts, error, original_url, image_url, uncropped_url, width, height, use_crop, source_url, title, caption, tags, hidden, blocked_source";
 
+/** A processing claim older than the stale window: its run has died. */
+export const STALE_CLAIM = `claimed_at < now() - interval '${STALE_CLAIM_MINUTES} minutes'`;
+
 /** Pending, failed with attempts left, or stuck in processing past the stale window. */
-const CLAIMABLE = `kind = 'image' and (status = 'pending' or (status = 'failed' and attempts < ${MAX_ATTEMPTS}) or (status = 'processing' and attempts < ${MAX_ATTEMPTS} and claimed_at < now() - interval '${STALE_CLAIM_MINUTES} minutes'))`;
+const CLAIMABLE = `kind = 'image' and (status = 'pending' or (status = 'failed' and attempts < ${MAX_ATTEMPTS}) or (status = 'processing' and attempts < ${MAX_ATTEMPTS} and ${STALE_CLAIM}))`;
 
 export async function insertImageItem({
   contentHash,
@@ -102,7 +105,7 @@ export async function releaseClaim(id: string): Promise<void> {
 export async function failExhaustedClaims(): Promise<number> {
   const rows = await db().query(
     `update items set status = 'failed', error = coalesce(error, 'Processing timed out.'), claimed_at = null
-     where kind = 'image' and status = 'processing' and attempts >= ${MAX_ATTEMPTS} and claimed_at < now() - interval '${STALE_CLAIM_MINUTES} minutes' returning id`,
+     where kind = 'image' and status = 'processing' and attempts >= ${MAX_ATTEMPTS} and ${STALE_CLAIM} returning id`,
   );
   return rows.length;
 }
