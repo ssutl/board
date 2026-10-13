@@ -5,16 +5,28 @@ import type { Box } from "@/lib/images/crop";
 export type Tags = { what: string; colours: string[]; palette: PaletteColour[]; materials: string[]; era: string; mood: string[] };
 export type Look = { box: Box | null; caption: string; tags: Tags };
 
-const words = (max: number) => z.array(z.string().trim().min(1).max(40)).max(max).default([]);
+// Over-long cosmetic fields are cut, not rejected: at temperature 0 a retry would return the same reply.
+const cut = (max: number) => z.string().transform((v) => v.trim().slice(0, max).trim());
+const words = (max: number) =>
+  z
+    .array(z.unknown())
+    .default([])
+    .transform((a) =>
+      a
+        .filter((v): v is string => typeof v === "string")
+        .map((v) => v.trim().slice(0, 40).trim())
+        .filter(Boolean)
+        .slice(0, max),
+    );
 
 const LookSchema = z.object({
   box: z.array(z.number()).length(4).nullable().default(null),
-  caption: z.string().trim().min(1).max(300),
-  what: z.string().trim().max(120).default(""),
+  caption: cut(300).pipe(z.string().min(1)),
+  what: cut(120).default(""),
   colours: words(8),
   palette: z.array(z.string()).default([]),
   materials: words(8),
-  era: z.string().trim().max(40).default(""),
+  era: cut(40).default(""),
   mood: words(6),
 });
 

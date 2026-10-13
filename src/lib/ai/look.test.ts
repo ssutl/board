@@ -30,4 +30,24 @@ describe("parseLook", () => {
     expect(() => parseLook(JSON.stringify({ box: null, caption: "  " }))).toThrow();
     expect(() => parseLook(JSON.stringify({ box: [1, 2, 3], caption: "x" }))).toThrow();
   });
+
+  it("truncates over-long cosmetic fields instead of rejecting the reply", () => {
+    const look = parseLook(
+      JSON.stringify({
+        box: null,
+        caption: "c".repeat(400),
+        what: "w".repeat(200),
+        colours: ["x".repeat(50), "  ", 7],
+        materials: Array.from({ length: 10 }, (_, i) => `m${i}`),
+        era: "e".repeat(60),
+        mood: Array.from({ length: 9 }, (_, i) => `d${i}`),
+      }),
+    );
+    expect(look.caption).toHaveLength(300);
+    expect(look.tags.what).toHaveLength(120);
+    expect(look.tags.colours).toEqual(["x".repeat(40)]);
+    expect(look.tags.materials).toHaveLength(8);
+    expect(look.tags.era).toHaveLength(40);
+    expect(look.tags.mood).toHaveLength(6);
+  });
 });
