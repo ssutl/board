@@ -36,7 +36,7 @@ from the ssutl-web portfolio.
 - Vitest
 
 Pieces to port from Reads: session auth (`src/lib/auth`, cookie/env renamed to
-`board_session` / `BOARD_SECRET` / `BOARD_PASSWORD`), k-means, chooseK and their
+`board_session` / `BOARD_SECRET` / `BOARD_PASSWORD`), k-means and its
 tests (`src/lib/vectors`), the Gemini client and `rateLimitDelayMs`
 (`src/lib/ai/gemini.ts`), the time-budget helpers (`src/lib/ai/budget.ts`, used
 to stop the cron sweep before Vercel's 300 s), the `/edit` password-in-place
@@ -66,6 +66,7 @@ items
   tags            jsonb  { what, colours[], palette[], materials[], era, mood[] }
                   palette = basic colours from a fixed list (red, orange, yellow, green,
                   blue, purple, pink, brown, beige, black, white, grey, silver, gold); drives the colour chips
+  width, height   int null   (of the image shown; for next/image)
   embedding       vector(1536) null
   hidden          bool default false
   blocked_source  bool default false  (Instagram/Pinterest/X link)
@@ -88,7 +89,9 @@ suggestions
   fingerprint text unique  (type + sorted member ids; stops a rejected suggestion reopening), created_at
 
 ai_usage
-  day date primary key, calls int   (daily Gemini call cap, env GEMINI_DAILY_CALLS, default 500)
+  (day date, purpose 'pipeline' | 'search') primary key, calls int
+  (daily Gemini call caps: GEMINI_DAILY_CALLS default 500 for the pipeline, SEARCH_DAILY_CALLS
+  default 300 for public search, so searches can't eat the pipeline's calls)
 
 settings
   key text primary key, value text
@@ -124,25 +127,32 @@ membership changes.
 
 ## Pipeline
 
-Runs per pending item via `after()` on drop, and via a Vercel cron every 15
-minutes that picks up `pending` items and `failed` items with `attempts < 3`.
+Runs per pending item via `after()` on drop, and via a daily sweep cron (05:00 UTC;
+the project is on Vercel Hobby, which allows one run a day) that picks up `pending`
+items and `failed` items with `attempts < 3`, then grows boards.
 
 1. **Look.** One Gemini vision call on the original returns
-   `{ crop: {x,y,w,h} | null, caption, what, colours[], materials[], era, mood[] }`.
-   `crop` is set only when the image is a screenshot with app UI around a main
+   `{ box: [ymin, xmin, ymax, xmax] | null, caption, what, colours[], materials[], era, mood[] }`
+   (box on a 0–1000 scale). `box` is set only when the image is a screenshot with app UI around a main
    picture. Crop with `sharp` (clamped to bounds; ignored if it would keep
    < 20% of the image), resize to max 2000 px, store as `image_url`.
-   No crop → `image_url` is the resized original.
+   No crop → `image_url` is the resized original. Transparent images are flattened onto
+   white during normalisation. `parseLook` and `nameBoard` truncate over-long fields
+   instead of rejecting the response.
 2. **Embed.** `embed({ image: image_url bytes, text: caption })` → 1536-d vector.
 3. **Place.** Cosine similarity to every visible board's centroid. Join every
    board with similarity ≥ `JOIN_THRESHOLD`, best 3 at most, skipping boards
    where this item is `excluded`. None → stays Loose. Recompute affected
    centroids. Mark item `ready`.
-4. **Grow.** If Loose has ≥ 12 items: k-means (Reads' chooseK) over Loose
-   embeddings only. Each cluster with ≥ 6 members whose mean similarity to the
-   cluster centroid ≥ `TIGHT_THRESHOLD` becomes a board. Gemini names it
-   (2–4 words) and writes one sentence; cover = member nearest the centroid.
-   Existing boards are not modified in this step.
+4. **Grow.** If Loose has ≥ 12 items, seed-and-grow over Loose embeddings only
+   (k-means with chooseK was rejected: Reads' `kRange` forces k ≥ 3 above 12 points,
+   which would split real clusters into fragments that fail the size gate):
+   pick the point with the most neighbours at similarity ≥ `TIGHT_THRESHOLD`,
+   gather the points within `JOIN_THRESHOLD` of their centroid, keep the group if it
+   has ≥ 6 members and mean similarity to its centroid ≥ `TIGHT_THRESHOLD`, then
+   repeat. Each kept group becomes a board. Gemini names it (2–4 words) and writes
+   one sentence; cover = member nearest the centroid. Existing boards are not
+   modified in this step. (k-means with k = 2 is still used for split suggestions.)
 
 Nightly cron, **suggestions**:
 - **Split:** for each board with ≥ 12 items, k=2 on its members; if both halves
@@ -151,16 +161,20 @@ Nightly cron, **suggestions**:
 - **Merge:** any two boards whose centroids' similarity ≥ `MERGE_THRESHOLD`
   → `merge` suggestion. One open suggestion per board pair/board at a time;
   a rejected suggestion is not reopened for the same membership.
-- Accepting applies it; pinned memberships are carried over.
+- Accepting applies it; pinned memberships are carried over. `mergeBoards` also
+  keeps the dropped board's exclusions, so a removed item doesn't come back.
 
 Thresholds live in one config file and start as: `JOIN_THRESHOLD` and
 `TIGHT_THRESHOLD` tuned on my first real batch (initial guesses 0.72 / 0.75),
 `SPLIT_THRESHOLD` 0.6, `MERGE_THRESHOLD` 0.9. Tuning them is expected.
 
 Claiming: a run sets `pending → processing` atomically before starting, so the
-`after()` run and the cron never process the same item twice.
+`after()` run and the cron never process the same item twice. The attempt is
+counted at claim, not on failure. A claim stale for 10 minutes is reclaimed; if
+it has already used 3 attempts, `failExhaustedClaims` marks it failed instead
+(so a function that timed out can't loop forever).
 
-Failure: any step throws → `status = 'failed'`, `attempts++`, `error` saved.
+Failure: any step throws → `status = 'failed'`, `error` saved.
 After 3 attempts it stays failed until retried by hand. Gemini calls count
 against the daily call cap; over the cap → the item goes back to pending
 without using an attempt, and is picked up the next day. Images are normalised
@@ -181,7 +195,7 @@ A hidden or non-public id returns the same 404 as a missing one.
   (filter), masonry of items newest first.
 - `/i/[id]` — sheet over the board (own page when opened directly): full image,
   caption, tags, source link, boards it's on, "more like this" (nearest 12
-  across all boards).
+  across all boards). Similar items are only shown when the item itself is public.
 - Search — embed the query text with the same model; masonry of nearest items
   plus boards whose centroid matches. Query capped at 200 chars.
 - Images through `next/image` from Blob. Board cover is the board's OG image.
@@ -191,9 +205,12 @@ A hidden or non-public id returns the same 404 as a missing one.
 
 Password box in place of the page without a session (as Reads). Sections:
 
-- **Drop** — ⌘V paste, drag files, paste URL; posts to `/api/drop`.
-- **Inbox** — pending and failed items; retry button on failed.
-- **Loose** — grid of unplaced items, plus link cards (incl. "screenshot this
+Routes: `/edit` (drop + inbox), `/edit/loose`, `/edit/items/[id]`, `/edit/boards`,
+`/edit/boards/[id]`, `/edit/suggestions`, `/edit/shortcut`.
+
+- **Drop** (`/edit`) — ⌘V paste, drag files, paste URL; posts to `/api/drop`.
+- **Inbox** (`/edit`) — pending and failed items; retry button on failed.
+- **Loose** (`/edit/loose`) — grid of unplaced items, plus link cards (incl. "screenshot this
   instead" for blocked sources).
 - **Suggestions** — split/merge with item previews; accept/reject.
 - **Item actions** — hide/show, delete (removes Blob files), add to board
@@ -224,9 +241,12 @@ a small `query(text, params)` interface that Neon's `sql.query` also satisfies.
 
 ## Setup
 
-New Vercel project (Framework Preset: Next.js), Neon with the `vector`
-extension, Vercel Blob store. Env: `DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`,
-`GEMINI_API_KEY`, `BOARD_PASSWORD`, `BOARD_SECRET`, `CRON_SECRET`.
+New Vercel project `board` (Framework Preset: Next.js), Neon in my own account with
+the `vector` extension, Vercel Blob store `board-images`. Env vars are Production-only
+secrets, so they can't be pulled locally; migrations run in the `vercel-build`
+script on deploy rather than from a dev machine. Env: `DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`,
+`GEMINI_API_KEY`, `BOARD_PASSWORD`, `BOARD_SECRET`, `CRON_SECRET`; optional
+`GEMINI_DAILY_CALLS`, `SEARCH_DAILY_CALLS`.
 DNS: `board.ssutl.com` → Vercel. Add a link-out entry in ssutl-web's
 `src/data/projects.ts`.
 
