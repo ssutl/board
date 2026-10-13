@@ -6,12 +6,15 @@ import { BudgetExceeded, spendCalls } from "@/lib/db/usage";
 import { normalize } from "@/lib/vectors/math";
 import { LOOK_PROMPT, parseLook, type Look } from "./look";
 
-export const VISION_MODEL = "gemini-2.5-flash";
+// gemini-2.5-flash is closed to new API keys ("no longer available to new users"); this key needs a 3.x model.
+// GEMINI_VISION_MODEL overrides it without a code change when Google retires this one too.
+export const VISION_MODEL = process.env.GEMINI_VISION_MODEL || "gemini-3.8-flash";
 export const EMBEDDING_MODEL = "gemini-embedding-2";
 // gemini-embedding-2 takes no task_type: task hints go in the text (as Reads does).
 export const DOCUMENT_PREFIX = "title: none | text: ";
 export const QUERY_PREFIX = "task: search result | query: ";
-const JSON_CONFIG = { temperature: 0, responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 0 } } as const;
+// Gemini 3 models are tuned for their default temperature and thinking settings, so only ask for JSON.
+const JSON_CONFIG = { responseMimeType: "application/json" } as const;
 const QUERY_CACHE_SIZE = 200;
 
 let client: GoogleGenAI | null = null;
