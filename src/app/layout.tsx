@@ -10,10 +10,13 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://board.ssutl.com"),
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({ children, sheet }: { children: React.ReactNode; sheet: React.ReactNode }) {
   return (
     <html lang="en" className={geist.variable}>
-      <body>{children}</body>
+      <body>
+        {children}
+        {sheet}
+      </body>
     </html>
   );
 }

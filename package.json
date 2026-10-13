@@ -10,8 +10,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:migrate": "tsx --env-file=.env.local scripts/migrate.mts",
-    "db:seed-dev": "tsx --conditions=react-server --env-file=.env.local scripts/seed-dev.mts"
+    "db:migrate": "tsx --env-file=.env.local scripts/migrate.mts"
   },
   "dependencies": {
     "@google/genai": "^2.29.0",
