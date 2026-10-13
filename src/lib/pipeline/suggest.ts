@@ -20,20 +20,25 @@ export async function runSuggestions(): Promise<number> {
 
     for (const b of boards) {
       if (busy.has(b.id) || b.size < MIN_SPLIT_BOARD) continue;
-      const members = await boardMembers(b.id);
-      const split = findSplit(members.map((m) => ({ id: m.itemId, embedding: m.embedding })));
-      if (!split) continue;
-      const fp = fingerprint("split", [b.id, ...members.map((m) => m.itemId)]);
-      if (await suggestionExists(fp)) continue;
-      const captions = new Map(members.map((m) => [m.itemId, m.caption ?? ""]));
-      const groups = [];
-      for (const itemIds of split.groups) {
-        const named = await nameBoard(itemIds.map((id) => captions.get(id) ?? "").filter(Boolean));
-        groups.push({ itemIds, ...named });
-      }
-      if (await openSuggestion({ type: "split", payload: { boardId: b.id, groups } }, fp)) {
-        opened++;
-        busy.add(b.id);
+      try {
+        const members = await boardMembers(b.id);
+        const split = findSplit(members.map((m) => ({ id: m.itemId, embedding: m.embedding })));
+        if (!split) continue;
+        const fp = fingerprint("split", [b.id, ...members.map((m) => m.itemId)]);
+        if (await suggestionExists(fp)) continue;
+        const captions = new Map(members.map((m) => [m.itemId, m.caption ?? ""]));
+        const groups = [];
+        for (const itemIds of split.groups) {
+          const named = await nameBoard(itemIds.map((id) => captions.get(id) ?? "").filter(Boolean));
+          groups.push({ itemIds, ...named });
+        }
+        if (await openSuggestion({ type: "split", payload: { boardId: b.id, groups } }, fp)) {
+          opened++;
+          busy.add(b.id);
+        }
+      } catch (error) {
+        if (isTransient(error)) break; // out of budget or rate limited: stop splitting, still look for merges
+        console.warn(`split suggestion for board ${b.id} skipped`, error);
       }
     }
 

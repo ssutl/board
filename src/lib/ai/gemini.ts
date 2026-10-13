@@ -110,7 +110,8 @@ export function rateLimitDelayMs(error: unknown): number | null {
   return Math.min(Number(retryDelay) * 1000 + 1000, MAX_RATE_LIMIT_DELAY_MS);
 }
 
-const BoardName = z.object({ name: z.string().trim().min(1).max(40), description: z.string().trim().min(1).max(200) });
+const cut = (max: number) => z.string().transform((v) => v.trim().slice(0, max).trim()).pipe(z.string().min(1));
+const BoardName = z.object({ name: cut(40), description: cut(200) });
 
 export async function nameBoard(captions: string[]): Promise<z.infer<typeof BoardName>> {
   await spendCalls("pipeline");

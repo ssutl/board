@@ -51,4 +51,9 @@ describe("gemini wrapper", () => {
     generateContent.mockResolvedValue({ text: JSON.stringify({ name: "Analog 80s", description: "Boxy, red and chrome." }) });
     expect(await nameBoard(["a red car", "a chrome hifi"])).toEqual({ name: "Analog 80s", description: "Boxy, red and chrome." });
   });
+
+  it("nameBoard cuts over-long replies instead of rejecting them", async () => {
+    generateContent.mockResolvedValue({ text: JSON.stringify({ name: "n".repeat(60), description: "d".repeat(300) }) });
+    expect(await nameBoard(["x"])).toEqual({ name: "n".repeat(40), description: "d".repeat(200) });
+  });
 });

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db/client";
 import { addToBoard, boardMembers, createBoard } from "@/lib/db/boards";
 import { listOpenSuggestions } from "@/lib/db/suggestions";
+import { BudgetExceeded } from "@/lib/db/usage";
 import { axis, insertTestItem, useTestDb } from "@/lib/db/testing";
 
 vi.mock("@/lib/ai/gemini", async (importOriginal) => ({
@@ -66,5 +67,26 @@ describe("suggestions", () => {
     await acceptSuggestion(s.id);
     expect((await db().query<{ id: string }>("select id from boards")).map((r) => r.id)).toEqual([b.id]);
     await expect(acceptSuggestion(s.id)).rejects.toThrow(/no longer open/);
+  });
+
+  async function splittableAndMergeable() {
+    await board("Mixed", [[0, 7], [10, 6]]);
+    await board("A", [[20, 6]]);
+    await board("B", [[20, 7]]);
+  }
+
+  it("a bad nameBoard reply skips that board but merges still open", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(gemini.nameBoard).mockRejectedValue(new SyntaxError("bad json"));
+    await splittableAndMergeable();
+    expect(await runSuggestions()).toBe(1);
+    expect((await listOpenSuggestions()).map((s) => s.type)).toEqual(["merge"]);
+  });
+
+  it("a budget error during splits still lets merges open", async () => {
+    vi.mocked(gemini.nameBoard).mockRejectedValue(new BudgetExceeded("pipeline"));
+    await splittableAndMergeable();
+    expect(await runSuggestions()).toBe(1);
+    expect((await listOpenSuggestions()).map((s) => s.type)).toEqual(["merge"]);
   });
 });
