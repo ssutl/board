@@ -11,6 +11,9 @@ export default async function Home() {
     <main className="mx-auto max-w-6xl px-4 py-8">
       <header className="mb-8 flex items-center justify-between gap-4">
         <div>
+          <a href="https://ssutl.com" className="mb-1 inline-block text-xs text-muted hover:text-ink">
+            ← ssutl.com
+          </a>
           <h1 className="text-sm font-semibold tracking-wide">board.ssutl.com</h1>
           <p className="text-sm text-muted">Domain for all my visions and screenshots</p>
           <p className="text-sm italic text-muted">You have to see it to believe it</p>
