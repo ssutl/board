@@ -118,7 +118,11 @@ membership changes.
   Otherwise fetch the page (timeout 8 s, size cap), read `og:image` / `twitter:image`
   and `<title>`. With an image: download it, store as original, insert a
   `pending` image item with `source_url`. Without: `link` card, edit-side only.
-- Upload size cap 15 MB (413). Accepted types: JPEG, PNG, WebP, GIF; anything
+- Vercel Functions reject request bodies over 4.5 MB before the route runs, so
+  that is the real per-request limit. The Shortcut sends 2000 px JPEGs; desktop
+  drops over 4 MB (or not JPEG/PNG/WebP/GIF) are downscaled in the browser to a
+  JPEG (longest side 3000 px, then 2000 px). `MAX_UPLOAD_BYTES` (15 MB, 413)
+  stays as a server-side cap. Accepted types: JPEG, PNG, WebP, GIF; anything
   else 415 (the Shortcut converts to JPEG, so HEIC never arrives).
 - The form field may be `file`, `url` or `input` (the Shortcut's single field):
   a File is an image, a string is searched for its first http(s) URL.
@@ -218,7 +222,7 @@ Routes: `/edit` (drop + inbox), `/edit/loose`, `/edit/items/[id]`, `/edit/boards
 - **Board actions** — rename, edit description, choose cover, hide.
 - **Shortcut** — generate/rotate the drop key (shown once), and the step-by-step
   Apple Shortcut setup: Show in Share Sheet (Images, URLs, Safari web pages)
-  → Convert Image to JPEG → Get Contents of URL (POST `/api/drop`, Bearer
+  → Convert Image to JPEG → Resize Image (2000 px) → Get Contents of URL (POST `/api/drop`, Bearer
   header, form field) → Show Notification "Saved".
 
 Every server action and mutating route checks the session.

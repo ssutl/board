@@ -7,7 +7,7 @@ Anyone can browse; only I can add or edit.
 Two surfaces:
 
 - **The public site** — a gallery wall:
-  - `/` — board covers (cover plus the three newest items), most recently added first, and a search box.
+  - `/` — board covers (cover plus the two newest items, three tiles), most recently added first, and a search box.
   - `/b/[slug]` — a board's description, colour chips (filter by the members' palette) and a
     masonry of its items, newest first.
   - `/i/[id]` — one item: image, caption, tags, source link, the boards it is on and "more like
@@ -18,7 +18,8 @@ Two surfaces:
   - `/edit/loose` — items on no board, plus link cards (including "screenshot this instead" for blocked sources).
   - `/edit/items/[id]` — hide/show, delete, add to a board (pins it), remove from a board
     (excludes it), use the original instead of the crop.
-  - `/edit/boards` and `/edit/boards/[id]` — rename, description, cover, hide, delete.
+  - `/edit/boards` and `/edit/boards/[id]` — rename, description, cover, hide. A board
+    disappears when its last member is removed.
   - `/edit/suggestions` — split and merge suggestions to accept or reject.
   - `/edit/shortcut` — generate or rotate the drop key and set up the Apple Shortcut.
 
@@ -38,18 +39,23 @@ every server action calls `requireSession()` before doing anything.
 ## Capture
 
 - **Phone:** an Apple Shortcut in the share sheet (Images, URLs, Safari web pages) → Convert
-  Image to JPEG → Get Contents of URL (POST `/api/drop`, `Authorization: Bearer <key>`, one form
+  Image to JPEG → Resize Image to 2000 px wide → Get Contents of URL (POST `/api/drop`, `Authorization: Bearer <key>`, one form
   field) → Show Notification. Generate the key and see the steps at `/edit/shortcut`; only a
   hash of the key is stored, and it is shown once.
-- **Desktop:** paste, drag or paste a URL on `/edit`.
+- **Desktop:** paste, drag or paste a URL on `/edit`. Images over 4 MB, or of another type
+  (e.g. HEIC), are downscaled in the browser to a JPEG (longest side 3000 px, then 2000 px)
+  before upload.
+
+Vercel Functions reject request bodies over 4.5 MB before the route runs, so that is the
+real per-request limit; the Shortcut sends 2000 px JPEGs and desktop drops are shrunk to fit.
 
 `POST /api/drop` (multipart form):
 
 - Field `file` (an image), `url` or `input` (the Shortcut's single field). A File is an image; a
   string is searched for its first http(s) URL.
 - Auth: the edit session cookie or the Bearer drop key. Otherwise 401.
-- Images are sniffed by magic bytes: JPEG, PNG, WebP, GIF. Anything else is 415. Over 15 MB is
-  413. A missing or unusable field is 400.
+- Images are sniffed by magic bytes: JPEG, PNG, WebP, GIF. Anything else is 415. Over
+  `MAX_UPLOAD_BYTES` (15 MB, a server-side cap behind Vercel's 4.5 MB request limit) is 413. A missing or unusable field is 400.
 - The same bytes twice (sha256) return the existing item with `duplicate: true` and no new row.
   Otherwise the original goes to Blob, a `pending` item is inserted, `{ id }` returns at once
   and processing continues in `after()`.

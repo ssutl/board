@@ -5,6 +5,34 @@ import { useCallback, useEffect, useState } from "react";
 
 type Entry = { label: string; message: string; ok: boolean };
 
+// Vercel Functions reject request bodies over 4.5 MB before our code runs, so big or
+// unusual images are re-encoded here first.
+const SEND_LIMIT = 4 * 1024 * 1024;
+const SENDABLE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+async function toJpeg(file: Blob, longest: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, longest / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#fff"; // JPEG has no alpha
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not encode image"))), "image/jpeg", 0.9),
+  );
+}
+
+/** Files over 4 MB or of another type (e.g. HEIC) become a JPEG, longest side 3000 px, then 2000 px if still too big. */
+async function shrink(file: File): Promise<Blob> {
+  if (file.size <= SEND_LIMIT && SENDABLE_TYPES.includes(file.type)) return file;
+  const big = await toJpeg(file, 3000);
+  return big.size <= SEND_LIMIT ? big : toJpeg(file, 2000);
+}
+
 function describe(status: number, data: { duplicate?: boolean; blocked?: boolean; kind?: string; error?: string }): Entry["message"] {
   if (status >= 400) return data.error ?? `Failed (${status})`;
   if (data.duplicate) return "Already saved";
@@ -21,12 +49,23 @@ export function DropZone() {
   const [over, setOver] = useState(false);
 
   const send = useCallback(
-    async (label: string, field: "file" | "url", value: Blob | string) => {
+    async (label: string, field: "file" | "url", value: File | string) => {
+      let entry: Entry;
       const body = new FormData();
-      body.append(field, value);
-      const res = await fetch("/api/drop", { method: "POST", body });
-      const data = await res.json().catch(() => ({}));
-      setLog((l) => [{ label, message: describe(res.status, data), ok: res.ok }, ...l].slice(0, 20));
+      try {
+        body.append(field, typeof value === "string" ? value : await shrink(value));
+      } catch {
+        setLog((l) => [{ label, message: "Couldn't read that image", ok: false }, ...l].slice(0, 20));
+        return;
+      }
+      try {
+        const res = await fetch("/api/drop", { method: "POST", body });
+        const data = await res.json().catch(() => ({}));
+        entry = { label, message: describe(res.status, data), ok: res.ok };
+      } catch {
+        entry = { label, message: "Failed (network)", ok: false };
+      }
+      setLog((l) => [entry, ...l].slice(0, 20));
       router.refresh();
     },
     [router],
