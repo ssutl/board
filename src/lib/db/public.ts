@@ -100,7 +100,7 @@ export async function similarPublicItems(id: string, limit = 12): Promise<Public
   return db().query<PublicItem>(
     `with pm as (${PUBLIC_MEMBERSHIPS}), pub as (select distinct item_id from pm)
      select ${ITEM} from items i join pub on pub.item_id = i.id
-     where i.id <> $1 and i.embedding is not null
+     where i.id <> $1 and i.embedding is not null and exists (select 1 from pm where pm.item_id = $1)
      order by i.embedding <=> (select embedding from items where id = $1) limit $2`,
     [id, limit],
   );
