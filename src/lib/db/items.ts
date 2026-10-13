@@ -28,7 +28,7 @@ const COLUMNS =
   "id, kind, status, attempts, error, original_url, image_url, uncropped_url, width, height, use_crop, source_url, title, caption, tags, hidden, blocked_source";
 
 /** Pending, failed with attempts left, or stuck in processing past the stale window. */
-const CLAIMABLE = `kind = 'image' and (status = 'pending' or (status = 'failed' and attempts < ${MAX_ATTEMPTS}) or (status = 'processing' and claimed_at < now() - interval '${STALE_CLAIM_MINUTES} minutes'))`;
+const CLAIMABLE = `kind = 'image' and (status = 'pending' or (status = 'failed' and attempts < ${MAX_ATTEMPTS}) or (status = 'processing' and attempts < ${MAX_ATTEMPTS} and claimed_at < now() - interval '${STALE_CLAIM_MINUTES} minutes'))`;
 
 export async function insertImageItem({
   contentHash,
@@ -66,7 +66,7 @@ export async function insertLinkItem({ sourceUrl, title, blocked }: { sourceUrl:
 
 export async function claimItem(id: string): Promise<ItemRow | null> {
   const [row] = await db().query<ItemRow>(
-    `update items set status = 'processing', claimed_at = now() where id = $1 and ${CLAIMABLE} returning ${COLUMNS}`,
+    `update items set status = 'processing', attempts = attempts + 1, claimed_at = now() where id = $1 and ${CLAIMABLE} returning ${COLUMNS}`,
     [id],
   );
   return row ?? null;
@@ -91,11 +91,20 @@ export async function markReady(id: string): Promise<void> {
 }
 
 export async function markFailed(id: string, error: string): Promise<void> {
-  await db().query("update items set status = 'failed', attempts = attempts + 1, error = $2, claimed_at = null where id = $1", [id, error.slice(0, 500)]);
+  await db().query("update items set status = 'failed', error = $2, claimed_at = null where id = $1", [id, error.slice(0, 500)]);
 }
 
 export async function releaseClaim(id: string): Promise<void> {
-  await db().query("update items set status = 'pending', claimed_at = null where id = $1", [id]);
+  await db().query("update items set status = 'pending', attempts = greatest(attempts - 1, 0), claimed_at = null where id = $1", [id]);
+}
+
+/** Stale claims that already used every attempt will never be retried: mark them failed. Returns how many. */
+export async function failExhaustedClaims(): Promise<number> {
+  const rows = await db().query(
+    `update items set status = 'failed', error = coalesce(error, 'Processing timed out.'), claimed_at = null
+     where kind = 'image' and status = 'processing' and attempts >= ${MAX_ATTEMPTS} and claimed_at < now() - interval '${STALE_CLAIM_MINUTES} minutes' returning id`,
+  );
+  return rows.length;
 }
 
 export async function getItem(id: string): Promise<ItemRow | null> {

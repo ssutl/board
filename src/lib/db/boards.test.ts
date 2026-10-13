@@ -87,4 +87,51 @@ describe("boards", () => {
     await removeFromBoard(board.ids[0], board.id);
     expect((await boardSummaries()).find((s) => s.id === board.id)?.size).toBe(2);
   });
+
+  it("mergeBoards keeps my exclusions from the dropped board", async () => {
+    const keep = await boardWith(2, 0, "Keep");
+    const drop = await boardWith(2, 0, "Drop");
+    await removeFromBoard(drop.ids[1], drop.id);
+    await mergeBoards(keep.id, drop.id);
+    const rows = await db().query<{ excluded: boolean }>("select excluded from board_items where board_id = $1 and item_id = $2", [keep.id, drop.ids[1]]);
+    expect(rows).toEqual([{ excluded: true }]);
+    expect((await boardMembers(keep.id)).map((m) => m.itemId)).not.toContain(drop.ids[1]);
+  });
+
+  it("mergeBoards with the same board is a no-op", async () => {
+    const board = await boardWith(2);
+    await mergeBoards(board.id, board.id);
+    expect(await boardMembers(board.id)).toHaveLength(2);
+  });
+
+  it("moveMembers keeps a pin when the item is already an unpinned member of the target", async () => {
+    const from = await boardWith(2, 0, "From");
+    const to = await boardWith(1, 4, "To");
+    await db().query("insert into board_items (board_id, item_id) values ($1, $2)", [to.id, from.ids[1]]);
+    await addToBoard(from.ids[1], from.id);
+    await moveMembers(from.id, to.id, [from.ids[1]]);
+    expect((await boardMembers(to.id)).find((m) => m.itemId === from.ids[1])?.pinned).toBe(true);
+  });
+
+  it("moveMembers leaves an item on the source when it is excluded on the target", async () => {
+    const from = await boardWith(2, 0, "From");
+    const to = await boardWith(1, 4, "To");
+    await removeFromBoard(from.ids[1], to.id);
+    await moveMembers(from.id, to.id, [from.ids[1]]);
+    expect((await boardMembers(from.id)).map((m) => m.itemId)).toContain(from.ids[1]);
+    expect((await boardMembers(to.id)).map((m) => m.itemId)).not.toContain(from.ids[1]);
+  });
+
+  it("moveMembers to the same board leaves it intact", async () => {
+    const board = await boardWith(2);
+    await moveMembers(board.id, board.id, [board.ids[0]]);
+    expect(await boardMembers(board.id)).toHaveLength(2);
+  });
+
+  it("does not delete a board whose only member has no embedding", async () => {
+    const item = await insertTestItem({ embedding: null });
+    const board = await createBoard({ name: "NoEmb", description: "", centroid: axis(0), coverItemId: item, members: [{ itemId: item, similarity: 0.9 }] });
+    await recomputeBoards([board.id]);
+    expect(await boardRow(board.id)).toBeDefined();
+  });
 });

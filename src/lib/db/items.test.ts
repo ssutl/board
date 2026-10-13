@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { db } from "./client";
 import { axis, insertTestItem, useTestDb } from "./testing";
-import { claimableIds, claimItem, deleteItem, insertImageItem, insertLinkItem, looseItems, markFailed, releaseClaim, resetForReprocess } from "./items";
+import { claimableIds, claimItem, deleteItem, failExhaustedClaims, insertImageItem, insertLinkItem, looseItems, markFailed, releaseClaim, resetForReprocess } from "./items";
 
 useTestDb();
 
@@ -29,6 +29,11 @@ describe("items", () => {
     await claimItem(id);
     await markFailed(id, "boom");
     expect(await claimableIds(10)).toEqual([id]);
+    await claimItem(id);
+    await markFailed(id, "boom");
+    await claimItem(id);
+    await markFailed(id, "boom");
+    expect(await claimableIds(10)).toEqual([]);
     await setRow(id, "attempts = 3");
     expect(await claimableIds(10)).toEqual([]);
     expect(await claimItem(id)).toBeNull();
@@ -75,5 +80,25 @@ describe("items", () => {
     const gone = await deleteItem(id);
     expect(gone?.files.sort()).toEqual(["https://blob/o", "https://blob/u", "https://x.public.blob.vercel-storage.com/a.jpg"].sort());
     expect(await deleteItem(id)).toBeNull();
+  });
+
+  it("counts attempts at claim time, and markFailed does not add one", async () => {
+    const { id } = await insertImageItem({ contentHash: "h9", originalUrl: "https://blob/9" });
+    await claimItem(id);
+    await markFailed(id, "boom");
+    const [row] = await db().query<{ attempts: number }>("select attempts from items where id = $1", [id]);
+    expect(row.attempts).toBe(1);
+  });
+
+  it("a stale processing item out of attempts is not claimable; failExhaustedClaims fails it", async () => {
+    const { id } = await insertImageItem({ contentHash: "h10", originalUrl: "https://blob/10" });
+    await claimItem(id);
+    await setRow(id, "attempts = 3, claimed_at = now() - interval '11 minutes'");
+    expect(await claimableIds(10)).toEqual([]);
+    expect(await claimItem(id)).toBeNull();
+    expect(await failExhaustedClaims()).toBe(1);
+    const [row] = await db().query<{ status: string; error: string; claimed_at: string | null }>("select status, error, claimed_at from items where id = $1", [id]);
+    expect(row).toEqual({ status: "failed", error: "Processing timed out.", claimed_at: null });
+    expect(await failExhaustedClaims()).toBe(0);
   });
 });
