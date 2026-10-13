@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  // useTestDb() registers Vitest hooks; it is not a React hook.
+  { files: ["**/*.test.ts"], rules: { "react-hooks/rules-of-hooks": "off" } },
 ]);
 
 export default eslintConfig;
