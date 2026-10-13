@@ -63,6 +63,16 @@ describe("public visibility", () => {
     expect(await getPublicItem(b)).toBeNull();
   });
 
+  it("similarPublicItems gives [] for a non-public or missing source id", async () => {
+    const a = await insertTestItem({ embedding: axis(0) });
+    const b = await insertTestItem({ embedding: axis(0) });
+    await boardOf("Pub", [a, b]);
+    const loose = await insertTestItem({ embedding: axis(0) });
+    const hidden = await insertTestItem({ embedding: axis(0), hidden: true });
+    expect((await similarPublicItems(a)).length).toBe(1);
+    for (const id of [loose, hidden, "00000000-0000-4000-8000-000000000000"]) expect(await similarPublicItems(id)).toEqual([]);
+  });
+
   it("a malformed id is a plain miss, not an error", async () => {
     expect(await getPublicItem("../etc")).toBeNull();
   });
