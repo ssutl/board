@@ -27,6 +27,7 @@ export async function normalizeImage(input: Uint8Array): Promise<Rendered> {
   const { data, info } = await sharp(input)
     .rotate()
     .resize({ width: 3000, height: 3000, fit: "inside", withoutEnlargement: true })
+    .flatten({ background: "#ffffff" })
     .jpeg({ quality: 90 })
     .toBuffer({ resolveWithObject: true });
   return { bytes: data, width: info.width, height: info.height };

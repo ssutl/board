@@ -30,6 +30,11 @@ describe("normalizeImage", () => {
     const out = await normalizeImage(await solid(50, 60).png().toBuffer());
     expect([out.width, out.height]).toEqual([50, 60]);
   });
+  it("flattens transparency onto white", async () => {
+    const png = await sharp({ create: { width: 20, height: 20, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).png().toBuffer();
+    const out = await normalizeImage(png);
+    expect((await sharp(out.bytes).raw().toBuffer())[0]).toBeGreaterThan(250);
+  });
 });
 
 describe("renderVariants", () => {
