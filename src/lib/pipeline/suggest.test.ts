@@ -69,6 +69,28 @@ describe("suggestions", () => {
     await expect(acceptSuggestion(s.id)).rejects.toThrow(/no longer open/);
   });
 
+  const hiddenOf = async (id: string) => (await db().query<{ hidden: boolean }>("select hidden from boards where id = $1", [id]))[0].hidden;
+
+  it("a split of a hidden board stays hidden", async () => {
+    const mixed = await board("Mixed", [[0, 7], [10, 6]]);
+    await runSuggestions();
+    const [s] = await listOpenSuggestions();
+    await db().query("update boards set hidden = true where id = $1", [mixed.id]); // hidden without going through setBoardHidden
+    await acceptSuggestion(s.id);
+    const boards = await db().query<{ hidden: boolean }>("select hidden from boards");
+    expect(boards.map((b) => b.hidden)).toEqual([true, true]);
+  });
+
+  it("a merge keeps the board hidden if either was hidden", async () => {
+    const a = await board("A", [[0, 6]]);
+    const b = await board("B", [[0, 7]]);
+    await runSuggestions();
+    const [s] = await listOpenSuggestions();
+    await db().query("update boards set hidden = true where id = $1", [a.id]);
+    await acceptSuggestion(s.id);
+    expect(await hiddenOf(b.id)).toBe(true);
+  });
+
   async function splittableAndMergeable() {
     await board("Mixed", [[0, 7], [10, 6]]);
     await board("A", [[20, 6]]);

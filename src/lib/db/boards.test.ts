@@ -5,7 +5,7 @@ import { axis, insertTestItem, useTestDb } from "./testing";
 import { fromVector } from "./vector";
 import {
   addToBoard, boardMembers, boardsForPlacement, boardSummaries, createBoard, mergeBoards, moveMembers,
-  recomputeBoards, removeFromBoard, replaceAutoMemberships,
+  recomputeBoards, removeFromBoard, replaceAutoMemberships, setBoardHidden,
 } from "./boards";
 import { openSuggestion, listOpenSuggestions } from "./suggestions";
 
@@ -60,6 +60,25 @@ describe("boards", () => {
     await removeFromBoard(board.ids[0], board.id);
     expect(await boardRow(board.id)).toBeUndefined();
     expect(await listOpenSuggestions()).toEqual([]);
+  });
+
+  it("hiding a board rejects its open suggestions", async () => {
+    const board = await boardWith(1);
+    const other = await boardWith(1, 4, "Other");
+    await openSuggestion({ type: "merge", payload: { keepId: other.id, dropId: board.id, similarity: 0.95 } }, "fp-merge");
+    await openSuggestion({ type: "split", payload: { boardId: other.id, groups: [] } }, "fp-split");
+    await setBoardHidden(board.id, true);
+    expect((await listOpenSuggestions()).map((s) => s.type)).toEqual(["split"]);
+    await setBoardHidden(board.id, false);
+    expect(await listOpenSuggestions()).toHaveLength(1);
+  });
+
+  it("mergeBoards hides the kept board when the dropped one was hidden", async () => {
+    const keep = await boardWith(1, 0, "Keep");
+    const drop = await boardWith(1, 0, "Drop");
+    await db().query("update boards set hidden = true where id = $1", [drop.id]);
+    await mergeBoards(keep.id, drop.id);
+    expect((await db().query<{ hidden: boolean }>("select hidden from boards where id = $1", [keep.id]))[0].hidden).toBe(true);
   });
 
   it("mergeBoards moves members, keeps pinned, respects exclusions, deletes the dropped board", async () => {

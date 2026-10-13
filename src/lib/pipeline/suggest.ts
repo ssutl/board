@@ -2,7 +2,7 @@ import "server-only";
 import { nameBoard } from "@/lib/ai/gemini";
 import { findMerges, findSplit, fingerprint } from "@/lib/boards/suggest";
 import { MIN_SPLIT_BOARD } from "@/lib/config";
-import { boardMembers, boardSummaries, createBoard, mergeBoards, moveMembers, renameBoard, setBoardDescription } from "@/lib/db/boards";
+import { boardMembers, boardSummaries, createBoard, findBoard, mergeBoards, moveMembers, renameBoard, setBoardDescription } from "@/lib/db/boards";
 import { acquireLease, releaseLease } from "@/lib/db/settings";
 import { boardsWithOpenSuggestions, getSuggestion, openSuggestion, setSuggestionStatus, suggestionExists } from "@/lib/db/suggestions";
 import { centroidOf } from "@/lib/vectors/centroid";
@@ -63,6 +63,8 @@ export async function acceptSuggestion(id: string): Promise<void> {
   } else {
     const { boardId, groups } = s.payload;
     const [keep, move] = groups;
+    const source = await findBoard(boardId);
+    if (!source) throw new Error("That board no longer exists.");
     const members = await boardMembers(boardId);
     const moving = members.filter((m) => move.itemIds.includes(m.itemId));
     if (moving.length === 0) throw new Error("Nothing left to split off.");
@@ -74,6 +76,7 @@ export async function acceptSuggestion(id: string): Promise<void> {
       centroid: centroidOf(moving.map((m) => m.embedding)),
       coverItemId: moving[0].itemId,
       members: [],
+      hidden: source.hidden, // a split of a hidden board stays hidden
     });
     await moveMembers(boardId, created.id, moving.map((m) => m.itemId));
   }

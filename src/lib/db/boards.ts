@@ -80,6 +80,7 @@ export async function createBoard(p: {
   centroid: number[];
   coverItemId: string;
   members: { itemId: string; similarity: number }[];
+  hidden?: boolean;
 }): Promise<{ id: string; slug: string }> {
   const id = randomUUID();
   const base = slugify(p.name);
@@ -87,8 +88,8 @@ export async function createBoard(p: {
   const slug = uniqueSlug(base, taken);
   await db().transaction([
     {
-      text: "insert into boards (id, slug, name, description, centroid, cover_item_id) values ($1, $2, $3, $4, $5::vector, $6)",
-      params: [id, slug, p.name, p.description, toVector(p.centroid), p.coverItemId],
+      text: "insert into boards (id, slug, name, description, centroid, cover_item_id, hidden) values ($1, $2, $3, $4, $5::vector, $6, $7)",
+      params: [id, slug, p.name, p.description, toVector(p.centroid), p.coverItemId, p.hidden ?? false],
     },
     {
       text: `insert into board_items (board_id, item_id, similarity)
@@ -97,6 +98,11 @@ export async function createBoard(p: {
     },
   ]);
   return { id, slug };
+}
+
+export async function findBoard(id: string): Promise<{ id: string; hidden: boolean } | null> {
+  const [row] = await db().query<{ id: string; hidden: boolean }>("select id, hidden from boards where id = $1", [id]);
+  return row ?? null;
 }
 
 export async function boardMembers(boardId: string): Promise<{ itemId: string; embedding: number[]; pinned: boolean; caption: string | null }[]> {
@@ -151,8 +157,12 @@ export async function setBoardCover(boardId: string, itemId: string): Promise<vo
   );
 }
 
+/** Hiding also rejects the board's open suggestions, so accepting one can't publish it again. */
 export async function setBoardHidden(id: string, hidden: boolean): Promise<void> {
-  await db().query("update boards set hidden = $2 where id = $1", [id, hidden]);
+  await db().transaction([
+    { text: "update boards set hidden = $2 where id = $1", params: [id, hidden] },
+    ...(hidden ? [{ text: REJECT_SUGGESTIONS_FOR, params: [id] }] : []),
+  ]);
 }
 
 export async function moveMembers(fromId: string, toId: string, itemIds: string[]): Promise<void> {
@@ -175,7 +185,10 @@ export async function moveMembers(fromId: string, toId: string, itemIds: string[
   await recomputeBoards([fromId, toId]);
 }
 
-/** Moves the dropped board's members into the kept one (pinned carried, my exclusions respected), then deletes it. */
+/**
+ * Moves the dropped board's members into the kept one (pinned carried, my exclusions respected), then deletes it.
+ * The kept board ends up hidden if either was.
+ */
 export async function mergeBoards(keepId: string, dropId: string): Promise<void> {
   if (keepId === dropId) return;
   await db().transaction([
@@ -192,6 +205,7 @@ export async function mergeBoards(keepId: string, dropId: string): Promise<void>
              on conflict (board_id, item_id) do nothing`,
       params: [keepId, dropId],
     },
+    { text: "update boards set hidden = true where id = $1 and exists (select 1 from boards where id = $2 and hidden)", params: [keepId, dropId] },
     { text: REJECT_SUGGESTIONS_FOR, params: [dropId] },
     { text: "delete from boards where id = $1", params: [dropId] },
   ]);
