@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@theme {
+  /* Light gallery wall: warm paper, near-black ink. */
+  --color-paper: #f3f1ec;
+  --color-card: #fbfaf7;
+  --color-ink: #1c1b19;
+  --color-muted: #6f6b63;
+  --color-line: #dcd7cc;
+  --color-edge: #c9c3b6;
+  --color-accent: #1c1b19;
+  --font-sans: var(--font-geist-sans);
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-paper text-ink font-sans antialiased;
+}
