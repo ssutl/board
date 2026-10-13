@@ -25,10 +25,11 @@ Two surfaces:
 
 ## Who sees what
 
-One SQL fragment, `PUBLIC_MEMBERSHIPS` in `src/lib/db/public.ts`, decides what is public: an item
-is visible only through a membership that isn't excluded, on a board that isn't hidden, when the
-item is a ready, unhidden image. Every public read goes through it, so Loose, pending, failed,
-hidden and link-only items are never public. A hidden or non-public id returns the same 404 as
+The visibility rule lives in `src/lib/db/public.ts`. Only ready, unhidden images can be public. Such
+an item is public when it's on a board that isn't hidden (`PUBLIC_MEMBERSHIPS`), or when it's Loose,
+on no board yet, in which case it shows in the home page's Unsorted section (`PUBLIC_ITEMS`). An item
+whose only boards are hidden stays private, as do pending, failed, hidden and link-only items. Every
+public read goes through these two fragments. A hidden or non-public id returns the same 404 as
 a missing one.
 
 `/edit` is behind `BOARD_PASSWORD`, which signs a `board_session` cookie (`BOARD_SECRET`).

@@ -187,13 +187,15 @@ returns the box as `[ymin, xmin, ymax, xmax]` on a 0–1000 scale.
 
 ## Public site
 
-Only `ready`, non-hidden image items with at least one non-excluded membership
-in a non-hidden board are ever visible (so Loose items are private). This is
-one SQL fragment used by every public query.
+Only `ready`, non-hidden image items are ever visible: those with a non-excluded
+membership in a non-hidden board, and Loose items (on no board yet), which show
+in an Unsorted section on `/` until a board forms. An item whose only boards are
+hidden stays private. (Changed after launch: Loose was originally private.)
 A hidden or non-public id returns the same 404 as a missing one.
 
 - `/` — gallery wall: board covers (cover + 2 most recent items as a mosaic),
-  name, item count; boards ordered by most recently added item. Search box
+  name, item count; boards ordered by most recently added item. Below them, an
+  Unsorted masonry of Loose items, newest first. Search box
   (`/` focuses it).
 - `/b/[slug]` — board name and description, colour chips from members' tags
   (filter), masonry of items newest first.

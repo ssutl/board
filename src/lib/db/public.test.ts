@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createBoard, removeFromBoard, setBoardHidden } from "./boards";
 import { db } from "./client";
 import { axis, insertTestItem, useTestDb } from "./testing";
-import { boardItems, boardPalette, boardsForItem, getPublicBoard, getPublicItem, listPublicBoards, searchPublic, similarPublicItems } from "./public";
+import { boardItems, boardPalette, boardsForItem, getPublicBoard, getPublicItem, listPublicBoards, searchPublic, similarPublicItems, unsortedItems } from "./public";
 
 useTestDb();
 
@@ -53,24 +53,40 @@ describe("public visibility", () => {
     expect((await searchPublic(axis(0))).boards.map((b) => b.slug)).toEqual(["open"]);
   });
 
-  it("Loose and excluded items are private", async () => {
-    const loose = await insertTestItem({ embedding: axis(0) });
+  it("Loose items are public and unsorted, newest first; removed-from-every-board counts as Loose", async () => {
+    const older = await insertTestItem({ embedding: axis(0), createdAt: "2026-01-01T00:00:00Z" });
+    const newer = await insertTestItem({ embedding: axis(0), createdAt: "2026-02-01T00:00:00Z" });
     const a = await insertTestItem({ embedding: axis(0) });
     const b = await insertTestItem({ embedding: axis(0) });
     const board = await boardOf("B", [a, b]);
     await removeFromBoard(b, board.id);
-    expect(await getPublicItem(loose)).toBeNull();
-    expect(await getPublicItem(b)).toBeNull();
+    expect(await getPublicItem(older)).not.toBeNull();
+    expect(await getPublicItem(b)).not.toBeNull();
+    expect((await searchPublic(axis(0))).items.map((i) => i.id)).toEqual(expect.arrayContaining([older, newer, a, b]));
+    expect((await unsortedItems()).map((i) => i.id)).toEqual([b, newer, older]);
+  });
+
+  it("unsorted never includes hidden, pending, link or on-a-hidden-board items", async () => {
+    await insertTestItem({ embedding: axis(0), hidden: true });
+    await insertTestItem({ embedding: axis(0), status: "pending" });
+    await insertTestItem({ kind: "link", imageUrl: "" });
+    const onHidden = await insertTestItem({ embedding: axis(0) });
+    const secret = await boardOf("Secret", [onHidden]);
+    await setBoardHidden(secret.id, true);
+    expect(await unsortedItems()).toEqual([]);
+    expect(await getPublicItem(onHidden)).toBeNull();
   });
 
   it("similarPublicItems gives [] for a non-public or missing source id", async () => {
     const a = await insertTestItem({ embedding: axis(0) });
     const b = await insertTestItem({ embedding: axis(0) });
     await boardOf("Pub", [a, b]);
-    const loose = await insertTestItem({ embedding: axis(0) });
+    const onHidden = await insertTestItem({ embedding: axis(0) });
+    const secret = await boardOf("Secret", [onHidden], 4);
+    await setBoardHidden(secret.id, true);
     const hidden = await insertTestItem({ embedding: axis(0), hidden: true });
     expect((await similarPublicItems(a)).length).toBe(1);
-    for (const id of [loose, hidden, "00000000-0000-4000-8000-000000000000"]) expect(await similarPublicItems(id)).toEqual([]);
+    for (const id of [onHidden, hidden, "00000000-0000-4000-8000-000000000000"]) expect(await similarPublicItems(id)).toEqual([]);
   });
 
   it("a malformed id is a plain miss, not an error", async () => {

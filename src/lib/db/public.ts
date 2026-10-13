@@ -3,14 +3,25 @@ import type { Tags } from "@/lib/ai/look";
 import { db } from "./client";
 import { toVector } from "./vector";
 
+/** A ready, unhidden image: the only kind of item that can ever be public. */
+const PUBLIC_IMAGE = "i.status = 'ready' and i.kind = 'image' and not i.hidden and i.image_url is not null";
+
+/** On no board yet (or removed from every board): shown as Unsorted until a board forms. */
+const LOOSE = "not exists (select 1 from board_items lb where lb.item_id = i.id and not lb.excluded)";
+
 /**
- * THE visibility rule: an item is public through a membership that isn't excluded, on a board
- * that isn't hidden, when the item is a ready, unhidden image. Every public read goes through this.
+ * THE visibility rule, in two forms. PUBLIC_MEMBERSHIPS: an item is public on a board through a
+ * membership that isn't excluded, on a board that isn't hidden. PUBLIC_ITEMS: an item is public
+ * when it's on such a board, or when it's Loose. An item whose only boards are hidden stays private.
+ * Every public read goes through one of these.
  */
 export const PUBLIC_MEMBERSHIPS = `select bi.item_id, bi.board_id from board_items bi
   join items i on i.id = bi.item_id
   join boards b on b.id = bi.board_id
-  where not bi.excluded and not b.hidden and i.status = 'ready' and i.kind = 'image' and not i.hidden and i.image_url is not null`;
+  where not bi.excluded and not b.hidden and ${PUBLIC_IMAGE}`;
+
+export const PUBLIC_ITEMS = `select i.id as item_id from items i
+  where ${PUBLIC_IMAGE} and (${LOOSE} or exists (select 1 from (${PUBLIC_MEMBERSHIPS}) m where m.item_id = i.id))`;
 
 export type PublicItem = { id: string; image_url: string; width: number; height: number; caption: string | null };
 export type PublicItemDetail = PublicItem & { title: string | null; source_url: string | null; tags: Partial<Tags> };
@@ -75,12 +86,17 @@ export async function boardPalette(boardId: string): Promise<{ colour: string; c
   );
 }
 
+/** Public items not on any board yet, newest first: the home page's Unsorted section. */
+export async function unsortedItems(limit = 60): Promise<PublicItem[]> {
+  return db().query<PublicItem>(`select ${ITEM} from items i where ${PUBLIC_IMAGE} and ${LOOSE} order by i.created_at desc limit $1`, [limit]);
+}
+
 export async function getPublicItem(id: string): Promise<PublicItemDetail | null> {
   if (!UUID.test(id)) return null;
   const [row] = await db().query<PublicItemDetail>(
-    `with pm as (${PUBLIC_MEMBERSHIPS})
+    `with pub as (${PUBLIC_ITEMS})
      select ${ITEM}, i.title, i.source_url, i.tags from items i
-     where i.id = $1 and exists (select 1 from pm where pm.item_id = i.id)`,
+     where i.id = $1 and exists (select 1 from pub where pub.item_id = i.id)`,
     [id],
   );
   return row ?? null;
@@ -98,9 +114,9 @@ export async function boardsForItem(id: string): Promise<{ slug: string; name: s
 export async function similarPublicItems(id: string, limit = 12): Promise<PublicItem[]> {
   if (!UUID.test(id)) return [];
   return db().query<PublicItem>(
-    `with pm as (${PUBLIC_MEMBERSHIPS}), pub as (select distinct item_id from pm)
+    `with pub as (${PUBLIC_ITEMS})
      select ${ITEM} from items i join pub on pub.item_id = i.id
-     where i.id <> $1 and i.embedding is not null and exists (select 1 from pm where pm.item_id = $1)
+     where i.id <> $1 and i.embedding is not null and exists (select 1 from pub p where p.item_id = $1)
      order by i.embedding <=> (select embedding from items where id = $1) limit $2`,
     [id, limit],
   );
@@ -110,7 +126,7 @@ export async function searchPublic(vector: number[]): Promise<{ items: PublicIte
   const v = toVector(vector);
   const [items, boards] = await Promise.all([
     db().query<PublicItem>(
-      `with pm as (${PUBLIC_MEMBERSHIPS}), pub as (select distinct item_id from pm)
+      `with pub as (${PUBLIC_ITEMS})
        select ${ITEM} from items i join pub on pub.item_id = i.id where i.embedding is not null
        order by i.embedding <=> $1::vector limit 48`,
       [v],
