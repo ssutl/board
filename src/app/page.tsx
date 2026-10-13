@@ -13,6 +13,7 @@ export default async function Home() {
         <div>
           <h1 className="text-sm font-semibold tracking-wide">board.ssutl.com</h1>
           <p className="text-sm text-muted">Domain for all my visions and screenshots</p>
+          <p className="text-sm italic text-muted">You have to see it to believe it</p>
         </div>
         <SearchBox />
       </header>
