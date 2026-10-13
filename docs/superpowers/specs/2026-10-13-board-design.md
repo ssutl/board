@@ -27,16 +27,22 @@ from the ssutl-web portfolio.
 - Next.js (app router) + TypeScript on Vercel
 - Neon Postgres + pgvector
 - Vercel Blob for images
-- Gemini: a vision model for crop + caption + tags; **Gemini Embedding 2**
-  (`gemini-embedding-2-preview`, multimodal) for image+caption embeddings at
-  1536 dims. It is in preview, so every embedding call goes through one
-  `embed()` function so the model can be swapped in one file.
+- Gemini: `gemini-2.5-flash` (as Reads) for crop + caption + tags + board
+  names; **`gemini-embedding-2`** (the multimodal model Reads already uses for
+  text) for image+caption embeddings at 1536 dims. It takes no task_type, so
+  task hints go in the text part (Reads' `DOCUMENT_PREFIX` / `QUERY_PREFIX`).
+  Every embedding call goes through one `embed()` function.
 - `sharp` for cropping/resizing
 - Vitest
 
-Pieces to port from Reads: session auth (`src/lib/auth`), k-means and chooseK
-(`src/lib/vectors`), Gemini client and daily budget guard (`src/lib/ai`), the
-`/edit` password-in-place layout, vector helpers in `src/lib/db`.
+Pieces to port from Reads: session auth (`src/lib/auth`, cookie/env renamed to
+`board_session` / `BOARD_SECRET` / `BOARD_PASSWORD`), k-means, chooseK and their
+tests (`src/lib/vectors`), the Gemini client and `rateLimitDelayMs`
+(`src/lib/ai/gemini.ts`), the time-budget helpers (`src/lib/ai/budget.ts`, used
+to stop the cron sweep before Vercel's 300 s), the `/edit` password-in-place
+layout + SignInForm + signIn action, `proxy.ts`, `scripts/migrate.mts`, vector
+helpers in `src/lib/db/vector.ts`. Reads' budget.ts is a *time* budget; the
+daily Gemini *call cap* below is new.
 
 ## Data model
 
@@ -45,16 +51,21 @@ items
   id              uuid
   created_at
   kind            'image' | 'link'
-  status          'pending' | 'ready' | 'failed'
+  status          'pending' | 'processing' | 'ready' | 'failed'
+  claimed_at      timestamptz null  (processing older than 10 min is reclaimed)
   attempts        int  (pipeline retries, max 3)
   error           text null
   content_hash    text unique null   (sha256 of uploaded bytes; dedupe)
   original_url    text null   Blob URL of the upload, untouched
-  image_url       text null   Blob URL of the cropped image shown publicly
+  image_url       text null   Blob URL of the image shown publicly (cropped unless use_crop is false)
+  uncropped_url   text null   Blob URL of the resized, uncropped image
+  use_crop        bool default true  ("use original instead of crop" sets false and reprocesses)
   source_url      text null   the link shared, if any
   title           text null   page title or AI caption
   caption         text null
-  tags            jsonb  { what, colours[], materials[], era, mood[] }
+  tags            jsonb  { what, colours[], palette[], materials[], era, mood[] }
+                  palette = basic colours from a fixed list (red, orange, yellow, green,
+                  blue, purple, pink, brown, beige, black, white, grey, silver, gold); drives the colour chips
   embedding       vector(1536) null
   hidden          bool default false
   blocked_source  bool default false  (Instagram/Pinterest/X link)
@@ -73,10 +84,16 @@ board_items
   primary key (board_id, item_id)
 
 suggestions
-  id, type ('split' | 'merge'), payload jsonb, status ('open' | 'accepted' | 'rejected'), created_at
+  id, type ('split' | 'merge'), payload jsonb, status ('open' | 'accepted' | 'rejected'),
+  fingerprint text unique  (type + sorted member ids; stops a rejected suggestion reopening), created_at
+
+ai_usage
+  day date primary key, calls int   (daily Gemini call cap, env GEMINI_DAILY_CALLS, default 500)
 
 settings
-  drop_key_hash   (hash of the Shortcut's Bearer key)
+  key text primary key, value text
+  drop_key_hash   (sha256 of the Shortcut's Bearer key)
+  grow_lock / suggest_lock  (lease timestamps so two runs never form duplicate boards)
 ```
 
 "Loose" = ready items with no non-excluded `board_items` row. No table.
@@ -98,7 +115,12 @@ membership changes.
   Otherwise fetch the page (timeout 8 s, size cap), read `og:image` / `twitter:image`
   and `<title>`. With an image: download it, store as original, insert a
   `pending` image item with `source_url`. Without: `link` card, edit-side only.
-- Upload size cap 15 MB; non-image files rejected (400).
+- Upload size cap 15 MB (413). Accepted types: JPEG, PNG, WebP, GIF; anything
+  else 415 (the Shortcut converts to JPEG, so HEIC never arrives).
+- The form field may be `file`, `url` or `input` (the Shortcut's single field):
+  a File is an image, a string is searched for its first http(s) URL.
+- Outbound fetches allow http/https only and refuse localhost and private
+  address literals.
 
 ## Pipeline
 
@@ -135,13 +157,21 @@ Thresholds live in one config file and start as: `JOIN_THRESHOLD` and
 `TIGHT_THRESHOLD` tuned on my first real batch (initial guesses 0.72 / 0.75),
 `SPLIT_THRESHOLD` 0.6, `MERGE_THRESHOLD` 0.9. Tuning them is expected.
 
+Claiming: a run sets `pending → processing` atomically before starting, so the
+`after()` run and the cron never process the same item twice.
+
 Failure: any step throws → `status = 'failed'`, `attempts++`, `error` saved.
-After 3 attempts it stays failed until retried by hand. Gemini calls go through
-the daily budget guard; over budget → items stay pending until the next day.
+After 3 attempts it stays failed until retried by hand. Gemini calls count
+against the daily call cap; over the cap → the item goes back to pending
+without using an attempt, and is picked up the next day. Images are normalised
+first (EXIF rotation, JPEG) so Gemini's crop box and `sharp` agree. Gemini
+returns the box as `[ymin, xmin, ymax, xmax]` on a 0–1000 scale.
 
 ## Public site
 
-Only `ready`, non-hidden image items on non-hidden boards are ever visible.
+Only `ready`, non-hidden image items with at least one non-excluded membership
+in a non-hidden board are ever visible (so Loose items are private). This is
+one SQL fragment used by every public query.
 A hidden or non-public id returns the same 404 as a missing one.
 
 - `/` — gallery wall: board covers (cover + 2 most recent items as a mosaic),
@@ -178,7 +208,9 @@ Every server action and mutating route checks the session.
 
 ## Testing
 
-Vitest, Gemini mocked with fixed captions/crops/embeddings.
+Vitest, Gemini and Blob mocked with fixed captions/crops/embeddings. SQL is
+tested for real against in-memory PGlite with the pgvector extension, through
+a small `query(text, params)` interface that Neon's `sql.query` also satisfies.
 
 - Placement: thresholds, best-3 cap, excluded boards skipped, centroid updates.
 - Grow: only Loose items clustered, size and tightness gates, existing boards untouched.
